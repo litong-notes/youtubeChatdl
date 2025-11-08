@@ -85,6 +85,17 @@ def main():
         type=str,
         help="单个视频URL（如果指定，则只下载该视频）"
     )
+    parser.add_argument(
+        "--auto-import-db",
+        action="store_true",
+        help="自动将下载的JSON导入到SQLite数据库"
+    )
+    parser.add_argument(
+        "--db-path",
+        type=str,
+        default="chat_database.db",
+        help="SQLite数据库路径（配合--auto-import-db使用，默认: chat_database.db）"
+    )
     
     args = parser.parse_args()
     
@@ -156,6 +167,19 @@ def main():
     print(f"⏭️ 跳过: {skipped}")
     print(f"❌ 失败: {failed}")
     print(f"📁 输出目录: {args.output_dir}")
+    
+    # 自动导入到数据库
+    if args.auto_import_db and successful > 0:
+        print(f"\n{'='*60}")
+        print(f"📥 自动导入到数据库")
+        print(f"{'='*60}")
+        from .db_importer import import_directory_to_db
+        import_directory_to_db(
+            args.output_dir,
+            args.db_path,
+            incremental=True,
+            verbose=True
+        )
 
 
 if __name__ == "__main__":

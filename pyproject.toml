@@ -11,6 +11,7 @@ dependencies = [
 
 [project.scripts]
 ytchat = "youtube_chat_downloader.cli:main"
+ytchat-import = "youtube_chat_downloader.import_to_db:main"
 
 [build-system]
 requires = ["hatchling"]

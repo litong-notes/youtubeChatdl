@@ -84,12 +84,41 @@ python -m youtube_chat_downloader.cli \
 }
 ```
 
+## 数据库导入
+
+### 下载时自动导入
+
+```bash
+python -m youtube_chat_downloader.cli \
+  --channel "CHANNEL_URL" \
+  --auto-import-db \
+  --db-path chat_database.db
+```
+
+### 独立导入命令
+
+```bash
+python -m youtube_chat_downloader.import_to_db \
+  --json-dir chat_replays \
+  --db-path chat_database.db \
+  --incremental
+```
+
+### 查看数据库统计
+
+```bash
+python -m youtube_chat_downloader.import_to_db \
+  --db-path chat_database.db \
+  --stats
+```
+
 ## 辅助工具
 
 ### 测试工具
 
 ```bash
 python test_cli.py
+python test_db_import.py
 ```
 
 ### 格式转换（SQLite → JSON）

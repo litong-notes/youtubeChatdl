@@ -79,6 +79,8 @@ python -m youtube_chat_downloader.cli \
 | `--sleep-interval` | 视频之间的休眠间隔（秒） | `5` |
 | `--channel` | YouTube 频道直播页面链接 | `https://www.youtube.com/@chenyifaer/streams` |
 | `--url` | 单个视频URL（如指定则只下载该视频） | - |
+| `--auto-import-db` | 自动将下载的JSON导入到SQLite数据库 | 关闭 |
+| `--db-path` | SQLite数据库路径（配合--auto-import-db使用） | `chat_database.db` |
 
 ## Cookie 文件（可选）
 
@@ -155,6 +157,74 @@ python -m youtube_chat_downloader.cli \
 - 逐个下载每个视频的聊天回放
 - 跳过已存在的文件（增量模式）
 - 每个视频之间休眠 10 秒
+
+## 数据库导入（新功能）
+
+### 将 JSON 导入到 SQLite 数据库
+
+除了 JSON 格式，现在还支持将数据导入到 SQLite 数据库，便于查询和分析。
+
+#### 方法 1: 下载时自动导入
+
+```bash
+python -m youtube_chat_downloader.cli \
+  --channel "https://www.youtube.com/@chenyifaer/streams" \
+  --incremental \
+  --auto-import-db \
+  --db-path chat_database.db
+```
+
+#### 方法 2: 独立导入命令
+
+```bash
+# 导入已下载的 JSON 文件
+python -m youtube_chat_downloader.import_to_db \
+  --json-dir chat_replays \
+  --db-path chat_database.db \
+  --incremental
+```
+
+#### 查看数据库统计
+
+```bash
+python -m youtube_chat_downloader.import_to_db \
+  --db-path chat_database.db \
+  --stats
+```
+
+### 数据库查询示例
+
+```python
+import sqlite3
+
+conn = sqlite3.connect('chat_database.db')
+cursor = conn.cursor()
+
+# 查询所有视频
+cursor.execute('SELECT video_id, title, total_messages FROM videos')
+for video_id, title, count in cursor.fetchall():
+    print(f"{title}: {count} 条消息")
+
+# 查询特定视频的消息
+cursor.execute('''
+    SELECT time_text, author, message 
+    FROM chat_messages 
+    WHERE video_id = ? 
+    ORDER BY offset_ms
+''', ('VIDEO_ID',))
+
+# 搜索包含关键词的消息
+cursor.execute('''
+    SELECT v.title, cm.author, cm.message
+    FROM chat_messages cm
+    JOIN videos v ON cm.video_id = v.video_id
+    WHERE cm.message LIKE ?
+''', ('%关键词%',))
+
+conn.close()
+```
+
+**详细说明请查看**: [数据库导入指南](DB_IMPORT_GUIDE.md)
 
 ## 查询 JSON 数据
 

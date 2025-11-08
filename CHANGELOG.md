@@ -1,5 +1,35 @@
 # 更新日志
 
+## [2.1.0] - 2024
+
+### 新增功能 - 数据库导入
+
+- 🗄️ JSON 文件导入到 SQLite 数据库
+- 📥 独立的导入命令 `ytchat-import`
+- 🔄 支持增量导入（跳过已存在的视频）
+- 📊 数据库统计信息查看
+- 🤖 下载时自动导入数据库 (`--auto-import-db`)
+- 🔍 优化的数据库索引提升查询性能
+- 📈 完整的视频和消息表结构
+
+### 新增文件
+
+- `youtube_chat_downloader/db_importer.py`: 数据库导入模块
+- `youtube_chat_downloader/import_to_db.py`: 导入CLI工具
+- `test_db_import.py`: 数据库导入测试
+- `DB_IMPORT_GUIDE.md`: 数据库导入详细指南
+
+### 新增 CLI 参数
+
+- `--auto-import-db`: 自动将下载的JSON导入到数据库
+- `--db-path`: SQLite数据库路径
+
+### 数据库结构
+
+- `videos` 表：存储视频元数据
+- `chat_messages` 表：存储聊天消息
+- 4个索引：video_id, offset_ms, author_id, upload_date
+
 ## [2.0.0] - 2024
 
 ### 新增功能
