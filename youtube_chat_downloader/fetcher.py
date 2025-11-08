@@ -5,6 +5,7 @@ import json
 import time
 import requests
 from yt_dlp import YoutubeDL
+from tqdm import tqdm
 
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
 
@@ -65,7 +66,7 @@ def fetch_chat(api_key, version, continuation, retries=3):
             r.raise_for_status()
             return r.json()
         except requests.exceptions.RequestException as e:
-            print(f"⚠️ {type(e).__name__}: {e} — 重试 {attempt+1}/{retries}")
+            tqdm.write(f"⚠️ {type(e).__name__}: {e} — 重试 {attempt+1}/{retries}")
             time.sleep(3)
     raise RuntimeError("❌ 重试后仍无法获取。")
 
@@ -220,14 +221,15 @@ def fetch_video_chat(url, cookies_file=None, verbose=True):
     max_seen_offset = 0
     seen_continuations = set()
 
+    pbar = None
     if verbose:
-        print("开始获取聊天消息...")
+        pbar = tqdm(total=duration, unit='s', desc='下载进度', bar_format='{desc}: {percentage:3.0f}%|{bar}| {n:.0f}/{total:.0f}s [{elapsed}<{remaining}]')
 
     start_time = time.time()
     for i in range(3000):
         if continuation in seen_continuations:
-            if verbose:
-                print("🔁 由于重复相同的 continuation，已终止。")
+            if pbar:
+                pbar.close()
             break
         seen_continuations.add(continuation)
 
@@ -239,33 +241,33 @@ def fetch_video_chat(url, cookies_file=None, verbose=True):
 
         if latest_offset > max_seen_offset:
             max_seen_offset = latest_offset
+            if pbar:
+                pbar.n = min(max_seen_offset / 1000, duration)
+                pbar.refresh()
 
         if max_seen_offset / 1000 >= duration:
-            if verbose:
-                print(f"🏁 已到达视频时间（{duration}s），已终止。")
+            if pbar:
+                pbar.n = duration
+                pbar.refresh()
+                pbar.close()
             break
 
         all_messages.extend(msgs)
-        
-        if verbose and msgs:
-            for msg in msgs:
-                print(f"{msg['time_text']} | {msg['author']} ({msg['author_id']}) | {msg['message']}", flush=True)
 
         next_c = extract_next_cont(data)
         if not next_c:
-            if verbose:
-                print("🟢 已无更多 continuation，已终止。")
+            if pbar:
+                pbar.close()
             break
         continuation = next_c
 
-        if verbose and i % 20 == 0:
-            elapsed = int(time.time() - start_time)
-            print(f"⏳ 已用时 {elapsed}s / 已获取 {len(all_messages)} 条 / 当前 {max_seen_offset//1000}s")
-
         time.sleep(0.08)
 
+    if pbar and not pbar.disable:
+        pbar.close()
+
     if verbose:
-        print(f"✅ 完成：已获取 {len(all_messages)} 条评论。")
+        print(f"✅ 完成：已获取 {len(all_messages)} 条评论")
 
     return {
         "video_info": video_info,
