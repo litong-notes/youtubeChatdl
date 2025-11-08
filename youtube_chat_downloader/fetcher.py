@@ -184,7 +184,7 @@ def get_livestream_urls(channel_url, cookies_file=None):
             result = ydl.extract_info(channel_url, download=False)
             if result and 'entries' in result:
                 for entry in result['entries']:
-                    if entry and entry.get('was_live'):
+                    if entry and entry.get('live_status') == 'was_live':
                         video_url = f"https://www.youtube.com/watch?v={entry['id']}"
                         urls.append(video_url)
         except Exception as e:

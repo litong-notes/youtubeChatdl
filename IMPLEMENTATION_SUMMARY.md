@@ -83,7 +83,7 @@ JSON 结构包含：
 功能：
 - 使用 yt-dlp 获取频道的所有直播视频链接
 - 模拟 `yt-dlp --flat-playlist --match-filter "is_live"` 的功能
-- 通过检查 `was_live` 属性过滤直播视频
+- 通过检查 `live_status` 属性过滤直播视频
 - 支持 cookies 文件用于认证
 
 实现逻辑：
@@ -98,7 +98,7 @@ if cookies_file:
 
 # 提取视频列表并过滤直播视频
 for entry in result['entries']:
-    if entry and entry.get('was_live'):
+    if entry and entry.get('live_status') == 'was_live':
         urls.append(video_url)
 ```
 
@@ -200,7 +200,7 @@ def get_livestream_urls(channel_url, cookies_file=None):
     with YoutubeDL(ydl_opts) as ydl:
         result = ydl.extract_info(channel_url, download=False)
         for entry in result['entries']:
-            if entry and entry.get('was_live'):  # --match-filter "is_live"
+            if entry and entry.get('live_status') == 'was_live':  # --match-filter "is_live"
                 video_url = f"https://www.youtube.com/watch?v={entry['id']}"
                 urls.append(video_url)
 ```
