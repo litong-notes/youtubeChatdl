@@ -2,6 +2,7 @@
 import re
 import json
 import time
+import sqlite3
 import requests
 from yt_dlp import YoutubeDL
 
@@ -78,7 +79,33 @@ def ms_to_timestamp(ms):
         return "0:00"
 
 
+def init_database(db_path):
+    """初始化SQLite数据库"""
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS chat_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            time_text TEXT,
+            author TEXT,
+            author_id TEXT,
+            message TEXT,
+            offset_ms INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_offset ON chat_messages(offset_ms)
+    ''')
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_author_id ON chat_messages(author_id)
+    ''')
+    conn.commit()
+    return conn
+
+
 def parse_messages(actions):
+    """解析消息，不过滤负时间戳"""
     messages = []
     latest_offset = 0
     for a in actions or []:
@@ -93,33 +120,30 @@ def parse_messages(actions):
                     if not author:
                         continue
 
+                    # 获取作者频道ID
+                    author_id = r.get("authorExternalChannelId", "")
+
                     msg_runs = r.get("message", {}).get("runs", [])
                     msg = "".join([x.get("text", "") for x in msg_runs]).strip()
                     if not msg:
                         continue
 
-                    # 获取时间戳（完全跳过负时间）
+                    # 获取时间戳（不过滤负时间）
                     offset = 0
                     time_text = "0:00"
                     if "videoOffsetTimeMsec" in r:
                         try:
                             offset = int(float(r["videoOffsetTimeMsec"]))
-                            if offset < 0:
-                                continue  # 🧹 排除负时间评论
                             time_text = ms_to_timestamp(offset)
                         except:
                             pass
                     elif "timestampText" in r:
                         time_text = r["timestampText"].get("simpleText", "0:00").strip()
-                        if time_text.startswith(
-                            "-"
-                        ):  # ✅ 检测负号标记并跳过
-                            continue
 
                     # 删除非法字符
                     msg = re.sub(r"[\x00-\x1F\x7F]", "", msg)
 
-                    messages.append((time_text, author, msg, offset))
+                    messages.append((time_text, author, author_id, msg, offset))
                     if offset > latest_offset:
                         latest_offset = offset
     return messages, latest_offset
@@ -153,6 +177,7 @@ def main(url):
     with YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=False)
         duration = info.get("duration", 0)
+        video_id = info.get("id", "unknown")
     print(f"📏 视频长度: {duration} 秒")
 
     html = fetch_html(url)
@@ -166,15 +191,16 @@ def main(url):
         print("❌ 未找到 continuation。")
         return
 
-    out = "chatlog.csv"
-    open(out, "w").close()
+    # 初始化数据库
+    db_path = f"chatlog_{video_id}.db"
+    conn = init_database(db_path)
+    cursor = conn.cursor()
+    
     total = 0
     max_seen_offset = 0
     seen_continuations = set()
 
-    print("time,user,comment")
-    with open(out, "a", encoding="utf-8") as f:
-        f.write("time,user,comment\n")
+    print("开始获取聊天消息...")
 
     start_time = time.time()
     for i in range(3000):
@@ -196,11 +222,16 @@ def main(url):
             print(f"🏁 已到达视频时间（{duration}s），已终止。")
             break
 
-        with open(out, "a", encoding="utf-8") as f:
-            for t, author, msg, offset in msgs:
-                total += 1
-                print(f"{t},{author},{msg}", flush=True)
-                f.write(f"{t},{author},{msg}\n")
+        # 批量插入数据库
+        for time_text, author, author_id, msg, offset in msgs:
+            cursor.execute('''
+                INSERT INTO chat_messages (time_text, author, author_id, message, offset_ms)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (time_text, author, author_id, msg, offset))
+            total += 1
+            print(f"{time_text} | {author} ({author_id}) | {msg}", flush=True)
+        
+        conn.commit()
 
         next_c = extract_next_cont(data)
         if not next_c:
@@ -214,28 +245,24 @@ def main(url):
 
         time.sleep(0.08)
 
-    print(f"✅ 完成：已将 {total} 条评论保存到 {out}。")
+    print(f"✅ 完成：已将 {total} 条评论保存到 {db_path}。")
 
-    # 🧹 删除重复评论处理（最后统一处理）
-    try:
-        with open(out, "r", encoding="utf-8") as f:
-            lines = f.readlines()
-
-        seen = set()
-        unique_lines = []
-        for line in lines:
-            if line not in seen:
-                seen.add(line)
-                unique_lines.append(line)
-
-        with open(out, "w", encoding="utf-8") as f:
-            f.writelines(unique_lines)
-
-        removed = len(lines) - len(unique_lines)
-        if removed > 0:
-            print(f"🧽 已删除 {removed} 行重复内容。")
-    except Exception as e:
-        print(f"⚠️ 删除重复内容时出错: {e}")
+    # 显示统计信息
+    cursor.execute('SELECT COUNT(*) FROM chat_messages')
+    total_count = cursor.fetchone()[0]
+    
+    cursor.execute('SELECT COUNT(DISTINCT author_id) FROM chat_messages WHERE author_id != ""')
+    unique_authors = cursor.fetchone()[0]
+    
+    cursor.execute('SELECT MIN(offset_ms), MAX(offset_ms) FROM chat_messages')
+    min_offset, max_offset = cursor.fetchone()
+    
+    print(f"\n📊 统计信息:")
+    print(f"   总消息数: {total_count}")
+    print(f"   独特用户数: {unique_authors}")
+    print(f"   时间范围: {ms_to_timestamp(min_offset if min_offset else 0)} - {ms_to_timestamp(max_offset if max_offset else 0)}")
+    
+    conn.close()
 
 
 if __name__ == "__main__":

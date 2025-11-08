@@ -37,6 +37,10 @@ env/
 # Project specific
 chatlog.csv
 *.csv
+*.db
+*.sqlite
+*.sqlite3
+chatlog_*.db
 www.youtube.com_cookies.txt
 *.txt
 

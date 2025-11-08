@@ -78,3 +78,45 @@ time,user,comment
 - 所有翻译保持了原意和代码功能不变
 - 添加了合适的 .gitignore 文件
 - 创建了详细的中文文档
+
+---
+
+## 最新更改 (2024) / Latest Changes
+
+### 数据存储改进
+- ✅ **使用 SQLite 数据库替代 CSV 文件**
+  - 数据库文件命名格式：`chatlog_<video_id>.db`
+  - 结构化存储，支持复杂查询
+  - 添加索引优化查询性能
+
+### 新增字段
+- ✅ **添加 author_id 字段**
+  - 来源：`authorExternalChannelId`
+  - 存储用户的 YouTube 频道 ID（通常以 UC 开头）
+  - 用于唯一标识用户
+
+### 过滤逻辑调整
+- ✅ **移除负时间戳过滤**
+  - 现在保留所有消息，包括负时间戳消息
+  - 可以记录直播开始前的等待聊天
+
+### 数据库架构
+```sql
+CREATE TABLE chat_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    time_text TEXT,
+    author TEXT,
+    author_id TEXT,
+    message TEXT,
+    offset_ms INTEGER,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_offset ON chat_messages(offset_ms);
+CREATE INDEX idx_author_id ON chat_messages(author_id);
+```
+
+### 统计功能
+- 自动显示总消息数
+- 自动显示独特用户数
+- 自动显示时间范围
