@@ -2,6 +2,7 @@
 import re
 import json
 import time
+import sqlite3
 import requests
 from yt_dlp import YoutubeDL
 
@@ -60,13 +61,13 @@ def fetch_chat(api_key, version, continuation, retries=3):
             r.raise_for_status()
             return r.json()
         except requests.exceptions.RequestException as e:
-            print(f"⚠️ {type(e).__name__}: {e} — 再試行 {attempt+1}/{retries}")
+            print(f"⚠️ {type(e).__name__}: {e} — 重试 {attempt+1}/{retries}")
             time.sleep(3)
-    raise RuntimeError("❌ 再試行しても取得できませんでした。")
+    raise RuntimeError("❌ 重试后仍无法获取。")
 
 
 def ms_to_timestamp(ms):
-    """ミリ秒を 0:00 形式に変換"""
+    """将毫秒转换为 0:00 格式"""
     try:
         s = int(ms) // 1000
         m, s = divmod(s, 60)
@@ -78,7 +79,33 @@ def ms_to_timestamp(ms):
         return "0:00"
 
 
+def init_database(db_path):
+    """初始化SQLite数据库"""
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS chat_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            time_text TEXT,
+            author TEXT,
+            author_id TEXT,
+            message TEXT,
+            offset_ms INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_offset ON chat_messages(offset_ms)
+    ''')
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_author_id ON chat_messages(author_id)
+    ''')
+    conn.commit()
+    return conn
+
+
 def parse_messages(actions):
+    """解析消息，不过滤负时间戳"""
     messages = []
     latest_offset = 0
     for a in actions or []:
@@ -93,33 +120,30 @@ def parse_messages(actions):
                     if not author:
                         continue
 
+                    # 获取作者频道ID
+                    author_id = r.get("authorExternalChannelId", "")
+
                     msg_runs = r.get("message", {}).get("runs", [])
                     msg = "".join([x.get("text", "") for x in msg_runs]).strip()
                     if not msg:
                         continue
 
-                    # タイムスタンプ取得（負の時間は完全スキップ）
+                    # 获取时间戳（不过滤负时间）
                     offset = 0
                     time_text = "0:00"
                     if "videoOffsetTimeMsec" in r:
                         try:
                             offset = int(float(r["videoOffsetTimeMsec"]))
-                            if offset < 0:
-                                continue  # 🧹 負の時間コメント除外
                             time_text = ms_to_timestamp(offset)
                         except:
                             pass
                     elif "timestampText" in r:
                         time_text = r["timestampText"].get("simpleText", "0:00").strip()
-                        if time_text.startswith(
-                            "-"
-                        ):  # ✅ マイナス表記を検出してスキップ
-                            continue
 
-                    # 不正文字除去
+                    # 删除非法字符
                     msg = re.sub(r"[\x00-\x1F\x7F]", "", msg)
 
-                    messages.append((time_text, author, msg, offset))
+                    messages.append((time_text, author, author_id, msg, offset))
                     if offset > latest_offset:
                         latest_offset = offset
     return messages, latest_offset
@@ -149,37 +173,39 @@ def main(url):
     ydl_opts = {
         'cookiefile': 'www.youtube.com_cookies.txt'  # <-- 在这里设置 cookie 文件路径
     }
-    # 🎬 動画情報を取得（duration秒を取得）
+    # 🎬 获取视频信息（获取时长秒数）
     with YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=False)
         duration = info.get("duration", 0)
-    print(f"📏 動画の長さ: {duration} 秒")
+        video_id = info.get("id", "unknown")
+    print(f"📏 视频长度: {duration} 秒")
 
     html = fetch_html(url)
     api_key, version, yid = extract_params(html)
     if not yid:
-        print("❌ ytInitialData が見つかりません。Cookie が必要かも。")
+        print("❌ 未找到 ytInitialData。可能需要 Cookie。")
         return
 
     continuation = find_continuation(yid)
     if not continuation:
-        print("❌ continuation が見つかりません。")
+        print("❌ 未找到 continuation。")
         return
 
-    out = "chatlog.csv"
-    open(out, "w").close()
+    # 初始化数据库
+    db_path = f"chatlog_{video_id}.db"
+    conn = init_database(db_path)
+    cursor = conn.cursor()
+    
     total = 0
     max_seen_offset = 0
     seen_continuations = set()
 
-    print("time,user,comment")
-    with open(out, "a", encoding="utf-8") as f:
-        f.write("time,user,comment\n")
+    print("开始获取聊天消息...")
 
     start_time = time.time()
     for i in range(3000):
         if continuation in seen_continuations:
-            print("🔁 同じ continuation が繰り返されたため終了します。")
+            print("🔁 由于重复相同的 continuation，已终止。")
             break
         seen_continuations.add(continuation)
 
@@ -193,49 +219,50 @@ def main(url):
             max_seen_offset = latest_offset
 
         if max_seen_offset / 1000 >= duration:
-            print(f"🏁 動画時間（{duration}s）に到達したため終了します。")
+            print(f"🏁 已到达视频时间（{duration}s），已终止。")
             break
 
-        with open(out, "a", encoding="utf-8") as f:
-            for t, author, msg, offset in msgs:
-                total += 1
-                print(f"{t},{author},{msg}", flush=True)
-                f.write(f"{t},{author},{msg}\n")
+        # 批量插入数据库
+        for time_text, author, author_id, msg, offset in msgs:
+            cursor.execute('''
+                INSERT INTO chat_messages (time_text, author, author_id, message, offset_ms)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (time_text, author, author_id, msg, offset))
+            total += 1
+            print(f"{time_text} | {author} ({author_id}) | {msg}", flush=True)
+        
+        conn.commit()
 
         next_c = extract_next_cont(data)
         if not next_c:
-            print("🟢 continuation が無くなったため終了します。")
+            print("🟢 已无更多 continuation，已终止。")
             break
         continuation = next_c
 
         if i % 20 == 0:
             elapsed = int(time.time() - start_time)
-            print(f"⏳ {elapsed}s経過 / {total}件取得 / 現在 {max_seen_offset//1000}s")
+            print(f"⏳ 已用时 {elapsed}s / 已获取 {total} 条 / 当前 {max_seen_offset//1000}s")
 
         time.sleep(0.08)
 
-    print(f"✅ 完了: {total} 件のコメントを {out} に保存しました。")
+    print(f"✅ 完成：已将 {total} 条评论保存到 {db_path}。")
 
-    # 🧹 重複コメント削除処理（最後にまとめて）
-    try:
-        with open(out, "r", encoding="utf-8") as f:
-            lines = f.readlines()
-
-        seen = set()
-        unique_lines = []
-        for line in lines:
-            if line not in seen:
-                seen.add(line)
-                unique_lines.append(line)
-
-        with open(out, "w", encoding="utf-8") as f:
-            f.writelines(unique_lines)
-
-        removed = len(lines) - len(unique_lines)
-        if removed > 0:
-            print(f"🧽 重複 {removed} 行を削除しました。")
-    except Exception as e:
-        print(f"⚠️ 重複削除中にエラー: {e}")
+    # 显示统计信息
+    cursor.execute('SELECT COUNT(*) FROM chat_messages')
+    total_count = cursor.fetchone()[0]
+    
+    cursor.execute('SELECT COUNT(DISTINCT author_id) FROM chat_messages WHERE author_id != ""')
+    unique_authors = cursor.fetchone()[0]
+    
+    cursor.execute('SELECT MIN(offset_ms), MAX(offset_ms) FROM chat_messages')
+    min_offset, max_offset = cursor.fetchone()
+    
+    print(f"\n📊 统计信息:")
+    print(f"   总消息数: {total_count}")
+    print(f"   独特用户数: {unique_authors}")
+    print(f"   时间范围: {ms_to_timestamp(min_offset if min_offset else 0)} - {ms_to_timestamp(max_offset if max_offset else 0)}")
+    
+    conn.close()
 
 
 if __name__ == "__main__":
