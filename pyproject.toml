@@ -1,0 +1,21 @@
+[project]
+name = "youtube-chat-downloader"
+version = "2.0.0"
+description = "YouTube 直播聊天回放下载器 - CLI工具"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "requests>=2.31.0",
+    "yt-dlp>=2023.12.30",
+]
+
+[project.scripts]
+ytchat = "youtube_chat_downloader.cli:main"
+ytchat-import = "youtube_chat_downloader.import_to_db:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = []

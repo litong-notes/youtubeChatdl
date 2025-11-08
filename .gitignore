@@ -41,8 +41,14 @@ chatlog.csv
 *.sqlite
 *.sqlite3
 chatlog_*.db
+chat_database.db
 www.youtube.com_cookies.txt
 *.txt
+chat_replays/
+*.json
 
 # Logs
 *.log
+
+# UV
+uv.lock
