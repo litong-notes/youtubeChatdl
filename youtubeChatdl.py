@@ -60,13 +60,13 @@ def fetch_chat(api_key, version, continuation, retries=3):
             r.raise_for_status()
             return r.json()
         except requests.exceptions.RequestException as e:
-            print(f"⚠️ {type(e).__name__}: {e} — 再試行 {attempt+1}/{retries}")
+            print(f"⚠️ {type(e).__name__}: {e} — 重试 {attempt+1}/{retries}")
             time.sleep(3)
-    raise RuntimeError("❌ 再試行しても取得できませんでした。")
+    raise RuntimeError("❌ 重试后仍无法获取。")
 
 
 def ms_to_timestamp(ms):
-    """ミリ秒を 0:00 形式に変換"""
+    """将毫秒转换为 0:00 格式"""
     try:
         s = int(ms) // 1000
         m, s = divmod(s, 60)
@@ -98,14 +98,14 @@ def parse_messages(actions):
                     if not msg:
                         continue
 
-                    # タイムスタンプ取得（負の時間は完全スキップ）
+                    # 获取时间戳（完全跳过负时间）
                     offset = 0
                     time_text = "0:00"
                     if "videoOffsetTimeMsec" in r:
                         try:
                             offset = int(float(r["videoOffsetTimeMsec"]))
                             if offset < 0:
-                                continue  # 🧹 負の時間コメント除外
+                                continue  # 🧹 排除负时间评论
                             time_text = ms_to_timestamp(offset)
                         except:
                             pass
@@ -113,10 +113,10 @@ def parse_messages(actions):
                         time_text = r["timestampText"].get("simpleText", "0:00").strip()
                         if time_text.startswith(
                             "-"
-                        ):  # ✅ マイナス表記を検出してスキップ
+                        ):  # ✅ 检测负号标记并跳过
                             continue
 
-                    # 不正文字除去
+                    # 删除非法字符
                     msg = re.sub(r"[\x00-\x1F\x7F]", "", msg)
 
                     messages.append((time_text, author, msg, offset))
@@ -149,21 +149,21 @@ def main(url):
     ydl_opts = {
         'cookiefile': 'www.youtube.com_cookies.txt'  # <-- 在这里设置 cookie 文件路径
     }
-    # 🎬 動画情報を取得（duration秒を取得）
+    # 🎬 获取视频信息（获取时长秒数）
     with YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=False)
         duration = info.get("duration", 0)
-    print(f"📏 動画の長さ: {duration} 秒")
+    print(f"📏 视频长度: {duration} 秒")
 
     html = fetch_html(url)
     api_key, version, yid = extract_params(html)
     if not yid:
-        print("❌ ytInitialData が見つかりません。Cookie が必要かも。")
+        print("❌ 未找到 ytInitialData。可能需要 Cookie。")
         return
 
     continuation = find_continuation(yid)
     if not continuation:
-        print("❌ continuation が見つかりません。")
+        print("❌ 未找到 continuation。")
         return
 
     out = "chatlog.csv"
@@ -179,7 +179,7 @@ def main(url):
     start_time = time.time()
     for i in range(3000):
         if continuation in seen_continuations:
-            print("🔁 同じ continuation が繰り返されたため終了します。")
+            print("🔁 由于重复相同的 continuation，已终止。")
             break
         seen_continuations.add(continuation)
 
@@ -193,7 +193,7 @@ def main(url):
             max_seen_offset = latest_offset
 
         if max_seen_offset / 1000 >= duration:
-            print(f"🏁 動画時間（{duration}s）に到達したため終了します。")
+            print(f"🏁 已到达视频时间（{duration}s），已终止。")
             break
 
         with open(out, "a", encoding="utf-8") as f:
@@ -204,19 +204,19 @@ def main(url):
 
         next_c = extract_next_cont(data)
         if not next_c:
-            print("🟢 continuation が無くなったため終了します。")
+            print("🟢 已无更多 continuation，已终止。")
             break
         continuation = next_c
 
         if i % 20 == 0:
             elapsed = int(time.time() - start_time)
-            print(f"⏳ {elapsed}s経過 / {total}件取得 / 現在 {max_seen_offset//1000}s")
+            print(f"⏳ 已用时 {elapsed}s / 已获取 {total} 条 / 当前 {max_seen_offset//1000}s")
 
         time.sleep(0.08)
 
-    print(f"✅ 完了: {total} 件のコメントを {out} に保存しました。")
+    print(f"✅ 完成：已将 {total} 条评论保存到 {out}。")
 
-    # 🧹 重複コメント削除処理（最後にまとめて）
+    # 🧹 删除重复评论处理（最后统一处理）
     try:
         with open(out, "r", encoding="utf-8") as f:
             lines = f.readlines()
@@ -233,9 +233,9 @@ def main(url):
 
         removed = len(lines) - len(unique_lines)
         if removed > 0:
-            print(f"🧽 重複 {removed} 行を削除しました。")
+            print(f"🧽 已删除 {removed} 行重复内容。")
     except Exception as e:
-        print(f"⚠️ 重複削除中にエラー: {e}")
+        print(f"⚠️ 删除重复内容时出错: {e}")
 
 
 if __name__ == "__main__":
